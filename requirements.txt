@@ -1,0 +1,44 @@
+# Core scientific stack
+numpy
+pandas
+scipy
+scikit-learn
+
+# NLP / LLMs
+transformers
+accelerate
+sentencepiece
+tokenizers
+
+# PyTorch (install the recommended Mac command from pytorch.org first if needed)
+torch
+torchvision
+
+# spaCy (for raw transcript work)
+spacy
+# After installing:
+#   python -m spacy download en_core_web_sm
+
+# Experiment tracking / data versioning
+mlflow
+dvc
+dvc-gdrive  # or another remote backend you prefer
+
+# Plotting/analysis
+matplotlib
+seaborn
+
+# Stats / reliability
+statsmodels
+
+# YAML / templating / CLI
+pyyaml
+jinja2
+typer
+tqdm
+rich
+
+# Fine-tuning (LoRA / QLoRA) – note: bitsandbytes requires CUDA, not Apple Silicon
+peft
+bitsandbytes
+datasets

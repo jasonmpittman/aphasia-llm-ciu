@@ -1,0 +1,65 @@
+system: |
+  You are an expert speech-language pathologist performing Correct Information Unit (CIU) analysis
+  following Nicholas & Brookshire (1993). You receive pre-tokenized utterances from a clinical
+  picture description task. Each token is a single word. For each token, you must decide if it is:
+  (1) a WORD (intelligible lexical item) or NOT WORD; and
+  (2) if WORD, whether it is a Correct Information Unit (CIU).
+  A CIU is a single WORD that is accurate, relevant, and informative about the pictured scene, and
+  understandable in context. Fillers ("uh", "um"), repetitions, false starts, and off-topic words are
+  NOT CIUs.
+
+prompts:
+  z_shot_local: |
+    You will receive a list of tokens with indices for a single short utterance.
+
+    Rules (summary):
+    - WORD = 1 if the token is an intelligible word (including fillers and function words), 0 otherwise.
+    - CIU = 1 if and only if:
+      * WORD = 1, and
+      * the word is accurate about the pictured scene, and
+      * the word is relevant (on-topic and adds information), and
+      * the word is understandable in context.
+    - Fillers (e.g., "uh", "um"), repetitions that do not add information, and off-topic words are NOT CIUs.
+
+    Task:
+    - Do NOT change, add, or remove tokens.
+    - For each token, output a JSON list of objects with fields:
+      "index", "token", "word_label", "ciu_label" where labels are 0 or 1.
+
+    Example of the expected output format (for illustration only):
+    [
+      {"index": 0, "token": "the", "word_label": 1, "ciu_label": 0},
+      {"index": 1, "token": "dog", "word_label": 1, "ciu_label": 1}
+    ]
+
+    Now label the following utterance:
+
+    Utterance ID: {{utterance_id}}
+
+    Tokens:
+    {{token_block}}
+
+  few_shot_local: |
+    Below are example utterances with correct labels. Study them carefully.
+
+    {{few_shot_examples}}
+
+    Now, using the exact same rules and output format, label the following utterance:
+
+    Utterance ID: {{utterance_id}}
+
+    Tokens:
+    {{token_block}}
+
+  few_shot_global: |
+    Below are example utterances with correct labels. Study them carefully.
+
+    {{few_shot_examples}}
+
+    Now you will receive the full transcript of a picture description task as a single list of tokens.
+    Label EVERY token in the transcript, using the same rules and JSON output format as before.
+
+    Transcript ID: {{transcript_id}}
+
+    Tokens:
+    {{token_block}}

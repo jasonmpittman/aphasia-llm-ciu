@@ -1,0 +1,89 @@
+\documentclass{article}
+
+% for arxiv submission
+\pdfoutput=1
+
+\usepackage{arxiv}
+
+\usepackage[utf8]{inputenc} % allow utf-8 input
+\usepackage[T1]{fontenc}    % use 8-bit T1 fonts
+\usepackage{hyperref}       % hyperlinks
+\usepackage{url}            % simple URL typesetting
+\usepackage{booktabs}       % professional-quality tables
+\usepackage{amsfonts}       % blackboard math symbols
+\usepackage{nicefrac}       % compact symbols for 1/2, etc.
+\usepackage{microtype}      % microtypography
+\usepackage{cleveref}       % smart cross-referencing
+\usepackage{lipsum}         % Can be removed after putting your text content
+\usepackage{graphicx}
+%\usepackage{natbib}
+\usepackage{doi}
+\usepackage{apacite}
+
+%% custom settings
+\usepackage[flushleft]{threeparttable}
+\usepackage{graphicx}
+\graphicspath{ {figures/} }
+
+%% spacing between headings
+\usepackage{titlesec}
+\titlespacing{\section}{0pt}{\parskip}{-\parskip}
+\titlespacing{\subsection}{0pt}{\parskip}{-\parskip}
+\titlespacing{\subsubsection}{0pt}{\parskip}{-\parskip}
+
+%% need a clever title here
+\title{}
+
+\date{}
+
+\author{Jason M. Pittman\\
+	University of Maryland Global Campus\\
+	\texttt{https://orcid.org/0000-0002-5198-8157} \\
+}
+
+%% PDF Metadata Setup
+\hypersetup{
+pdftitle={},
+pdfsubject={},
+pdfauthor={Jason M. Pittman},
+pdfkeywords={},
+}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+
+\end{abstract}
+
+\keywords{}
+
+\section{Introduction}
+\label{sec:introduction}
+
+%% what is the research problem?
+
+%% what is the social, scientific, or practical impact of the problem?
+
+%% what did we attempt to do as an answer to the problem?
+
+\section{Related Work}
+\label{sec:related-work}
+
+    \subsection{A}
+    %% one subsection for each concept or theory. one paragraph summary.
+
+\section{Methodology}
+  %% what did we do
+  %% how did we do it
+    \subsection{1}
+    %% one subsection for each step in how we did it
+
+\section{Results and Discussion}
+
+\section{Conclusions and Future Work}
+
+\bibliographystyle{apacite}
+\bibliography{references.bib}
+
+\end{document}

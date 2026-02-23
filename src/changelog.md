@@ -25,7 +25,13 @@
 -- aggregate_across_seeds() then collapses per-run rows into mean ± std for each (model, mode) pair — this is what goes in a results table in the paper.  
 -- _bootstrap_ci() is a clean general-purpose helper so it can be reused if you later want CIs on per-severity metrics too.
 -- compute_per_severity_metrics() groups by (model_name, mode, seed, severity) and runs the same point estimate logic independently for each stratum. Null severities are bucketed as "unknown" rather than silently dropped. The function warns and returns an empty DataFrame gracefully if the severity column is absent.  
--- run_mcnemar_tests() builds a token-level pivot across all (model, mode) conditions pooled across seeds, then runs pairwise McNemar's tests with Yates' continuity correction. The output CSV includes the full 2×2 table per pair, the test statistic, p-value, and a boolean significant_0_05 flag — making it straightforward to identify which model differences are statistically real rather than just numerically different.    
+-- run_mcnemar_tests() builds a token-level pivot across all (model, mode) conditions pooled across seeds, then runs pairwise McNemar's tests with Yates' continuity correction. The output CSV includes the full 2×2 table per pair, the test statistic, p-value, and a boolean significant_0_05 flag — making it straightforward to identify which model differences are statistically real rather than just numerically different.  
+
+**parse_llm_ouputs_hf.py**
+-- Every failure is now categorised into one of five named types — empty_response, no_json_array, json_decode_error, missing_fields, token_count_mismatch — and recorded in a ParseFailure dataclass rather than silently skipped with a print().  
+-- try three strategies in sequence: bracket scan, regex extraction from prose/markdown fences, and truncation repair (appending closing tokens for cut-off responses).  
+-- mismatches are explicitly detected, logged with the delta, and handled via a configurable --mismatch-strategy: drop (default, safe for metric computation) or truncate (for exploratory use, with a note to flag in the paper if used). The count of dropped and truncated tokens is tracked and reported.  
+-- A warning is emitted if the failure rate exceeds 10%, since at that level the metrics are materially affected and the paper should note it explicitly.  
 
 ### Removed
 

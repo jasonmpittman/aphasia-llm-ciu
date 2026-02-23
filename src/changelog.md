@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-23-02
+-- adjusted max_new_tokens, min_chunk_size in config.yaml, utils.py, and run_llm_inference.py to fix response truncation.
 
 ## [0.2.2] - 2026-23-02
 Implement token chunking to prevent prompt and ouput truncation due to model context windows

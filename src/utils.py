@@ -6,7 +6,7 @@ __author__ = "Jason M. Pittman"
 __copyright__ = "Copyright 2025"
 __credits__ = ["Jason M. Pittman"]
 __license__ = "Apache License 2.0"
-__version__ = "0.2.2"
+__version__ = "0.2.3"
 __maintainer__ = "Jason M. Pittman"
 __status__ = "Research"
 
@@ -208,6 +208,7 @@ def chunk_transcript(
     chunk_size: int,
     transcript_id: str,
     utterance_id: Optional[str] = None,
+    min_chunk_size: int = 10,
 ) -> List[Dict[str, Any]]:
     """
     Split a single transcript (or utterance) DataFrame into fixed-size chunks.
@@ -217,12 +218,16 @@ def chunk_transcript(
     slice of tokens ordered by token_index.
 
     Args:
-        group_df:      DataFrame slice for one transcript / utterance, sorted
-                       by token_index.
-        chunk_size:    Maximum number of tokens per chunk.
-        transcript_id: Parent transcript identifier — embedded in chunk metadata.
-        utterance_id:  Parent utterance identifier if grouping at utterance level,
-                       else None.
+        group_df:       DataFrame slice for one transcript / utterance, sorted
+                        by token_index.
+        chunk_size:     Maximum number of tokens per chunk.
+        transcript_id:  Parent transcript identifier — embedded in chunk metadata.
+        utterance_id:   Parent utterance identifier if grouping at utterance level,
+                        else None.
+        min_chunk_size: If the final chunk would contain fewer than this many
+                        tokens, it is merged into the preceding chunk rather than
+                        emitted as a degenerate stub.  Default 10.  Has no effect
+                        when there is only one chunk.
 
     Returns:
         List of chunk dicts, each containing:
@@ -239,7 +244,7 @@ def chunk_transcript(
 
     Example::
 
-        chunks = chunk_transcript(g, chunk_size=50, transcript_id="CR_005")
+        chunks = chunk_transcript(g, chunk_size=32, transcript_id="CR_005")
         for c in chunks:
             token_block = build_token_block_from_chunk(c)
     """
@@ -251,18 +256,24 @@ def chunk_transcript(
         else transcript_id
     )
 
-    rows      = group_df.to_dict("records")
-    n_tokens  = len(rows)
-    n_chunks  = max(1, (n_tokens + chunk_size - 1) // chunk_size)
+    rows     = group_df.to_dict("records")
+    n_tokens = len(rows)
+
+    # Build raw slices
+    slices: List[List[dict]] = []
+    for start in range(0, n_tokens, chunk_size):
+        slices.append(rows[start : start + chunk_size])
+
+    # Merge a degenerate final chunk into its predecessor
+    if len(slices) > 1 and len(slices[-1]) < min_chunk_size:
+        slices[-2].extend(slices[-1])
+        slices.pop()
+
+    n_chunks = len(slices)
     chunks: List[Dict[str, Any]] = []
 
-    for i in range(n_chunks):
-        start  = i * chunk_size
-        end    = min(start + chunk_size, n_tokens)
-        slice_ = rows[start:end]
-
+    for i, slice_ in enumerate(slices):
         chunk_id = f"{group_id}__chunk{i:03d}"
-
         chunks.append(
             {
                 "chunk_id":      chunk_id,

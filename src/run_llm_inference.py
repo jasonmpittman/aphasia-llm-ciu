@@ -6,7 +6,7 @@ __author__ = "Jason M. Pittman"
 __copyright__ = "Copyright 2026"
 __credits__ = ["Jason M. Pittman"]
 __license__ = "Apache License 2.0"
-__version__ = "0.2.2"
+__version__ = "0.2.3"
 __maintainer__ = "Jason M. Pittman"
 __status__ = "Research"
 
@@ -115,6 +115,7 @@ def load_hf_model_and_tokenizer(
         max_new_tokens=max_new_tokens,
         temperature=0.001,
         top_p=1.0,
+        return_full_text=False,  # return completion only, not prompt + completion
     )
     return text_gen, tokenizer
 
@@ -200,7 +201,13 @@ def main(
 
     model_cfg      = get_model_config(cfg, model_key)
     model_name     = model_cfg["model_name"]
-    max_new_tokens = int(model_cfg.get("max_new_tokens", 2048))
+    max_new_tokens = int(model_cfg.get("max_new_tokens", 1500))
+
+    # Chunk settings — CLI flags take precedence; config.yaml inference block
+    # provides defaults so values are consistent across all scripts.
+    inference_cfg   = cfg.data.get("inference", {})
+    eff_chunk_size  = chunk_size if chunk_size > 0 else int(inference_cfg.get("chunk_size", 32))
+    eff_min_chunk   = int(inference_cfg.get("min_chunk_size", 10))
 
     if use_lora and adapter_dir is None:
         adapter_dir = Path("models/llm") / f"{model_key}-ciu-lora"
@@ -291,12 +298,13 @@ def main(
         )
 
         # ---- Chunk the group ----------------------------------------- #
-        effective_chunk_size = chunk_size if chunk_size > 0 else len(g)
+        effective_chunk_size = eff_chunk_size if eff_chunk_size > 0 else len(g)
         chunks = chunk_transcript(
             group_df=g,
             chunk_size=effective_chunk_size,
             transcript_id=transcript_id,
             utterance_id=utterance_id,
+            min_chunk_size=eff_min_chunk,
         )
 
         if len(chunks) > 1:

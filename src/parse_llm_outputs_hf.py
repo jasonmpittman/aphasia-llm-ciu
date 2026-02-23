@@ -6,7 +6,7 @@ __author__ = "Jason M. Pittman"
 __copyright__ = "Copyright 2026"
 __credits__ = ["Jason M. Pittman"]
 __license__ = "Apache License 2.0"
-__version__ = "0.2.2"
+__version__ = "0.2.3"
 __maintainer__ = "Jason M. Pittman"
 __status__ = "Research"
 

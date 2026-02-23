@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+
+## [0.2.2] - 2026-23-02
+Implement token chunking to prevent prompt and ouput truncation due to model context windows
+
+**utils.py**
+Two new functions added:  
+-- chunk_transcript() — takes a group DataFrame, chunk_size, and identifiers, and returns a list of chunk dicts. Each chunk carries chunk_id, chunk_index, n_chunks, token_start, token_end, tokens, and critically token_indices — the original token_index values from the dataset. This is what allows the parser to align predictions back to ground truth by index rather than by position, which is robust to any dropped or failed chunks.  
+-- build_token_block_from_chunk() — renders the numbered token block string for a chunk using original token_index values as the line numbers. 
+
+**run_llm_inference.py**
+-- --chunk-size flag (default 50) added. Every group is now passed through chunk_transcript() unconditionally — single-chunk passthrough uses max(chunk_size, len(g)) so short transcripts are unchanged. Each chunk gets its own JSON wrapper file named <group_id>__chunk000.json, carrying the full chunk provenance. Setting --chunk-size 0 disables chunking for ablation purposes if needed.  
+
+**parse_llm_outputs_hf.py**
+-- Previous single-pass file loop is replaced with a two-stage process: first all wrappers are loaded and grouped by group_id, then each group's chunks are sorted by chunk_index, parsed individually, and their predictions assembled into a token_pred_map keyed by original token_index. Mismatch checks happen at the chunk level against len(token_indices). Legacy wrappers without token_indices fall back to using pred["index"] directly, so the parser remains backward compatible. The report.success counter now increments per group rather than per chunk.  
+
+
 ## [0.2.1] - 2026-23-02
 
 ### Added

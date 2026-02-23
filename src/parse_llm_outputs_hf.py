@@ -6,12 +6,27 @@ __author__ = "Jason M. Pittman"
 __copyright__ = "Copyright 2026"
 __credits__ = ["Jason M. Pittman"]
 __license__ = "Apache License 2.0"
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 __maintainer__ = "Jason M. Pittman"
 __status__ = "Research"
 
 """
 Parse HF LLM output JSON wrappers and merge with ground-truth labels.
+
+Chunk reassembly (v0.2.2)
+--------------------------
+run_llm_inference.py now writes one JSON wrapper *per chunk* rather than per
+transcript.  Each wrapper carries ``chunk_index``, ``n_chunks``, and
+``token_indices`` so the parser can:
+
+  1. Group all chunk files belonging to the same transcript / group.
+  2. Sort by ``chunk_index``.
+  3. Concatenate predicted records in order, using ``token_indices`` to align
+     each prediction to the correct ground-truth row by original token_index
+     rather than by position within the chunk.
+
+This means token-count mismatch checks are applied at the *chunk* level (where
+the expected count is ``len(token_indices)``), not at the full-transcript level.
 
 Robustness improvements over v0.1.0:
 
@@ -249,8 +264,24 @@ def handle_mismatch(
 
 
 # ---------------------------------------------------------------------------
-# Main parser
+# Main parser — chunk-aware
 # ---------------------------------------------------------------------------
+
+def _load_wrapper(json_file: Path, report: ParseQualityReport, logger) -> Optional[dict]:
+    """Load and return a single wrapper JSON, recording failure if unreadable."""
+    try:
+        return json.loads(json_file.read_text(encoding="utf-8"))
+    except Exception as exc:
+        report.failures.append(ParseFailure(
+            json_file=str(json_file),
+            transcript_id=None, group_id=None,
+            model_name=None, mode=None,
+            failure_type=FAILURE_JSON_DECODE,
+            detail=f"Wrapper load failed: {exc}",
+        ))
+        logger.warning("Could not load wrapper %s: %s", json_file.name, exc)
+        return None
+
 
 def parse_directory(
     raw_dir: Path,
@@ -260,12 +291,25 @@ def parse_directory(
     logger,
 ) -> List[dict]:
     """
-    Walk *raw_dir* recursively, parse every *.json wrapper file, and return
-    a list of merged row dicts ready for DataFrame construction.
+    Walk *raw_dir* recursively, parse every *.json chunk wrapper, reassemble
+    chunks into full-transcript predictions, and return merged row dicts.
+
+    Chunk reassembly
+    ----------------
+    Wrappers produced by run_llm_inference v0.2.2 carry ``chunk_index``,
+    ``n_chunks``, and ``token_indices``.  Files are grouped by ``group_id``,
+    sorted by ``chunk_index``, and their predicted records are concatenated in
+    order.  Each prediction is then aligned to ground truth by
+    ``token_index`` (from ``token_indices``) rather than by position, which
+    is robust to chunks of unequal size and to any dropped chunks.
+
+    Legacy wrappers (pre-chunking) that lack ``chunk_index`` are treated as
+    single-chunk groups and processed identically.
+
+    Mismatch checks are applied at the *chunk* level against the slice of
+    ground-truth rows whose token_index falls within [token_start, token_end].
     """
     json_files = sorted(raw_dir.rglob("*.json"))
-
-    # Exclude any metadata/sidecar files written by earlier pipeline steps
     json_files = [
         f for f in json_files
         if not any(
@@ -275,108 +319,131 @@ def parse_directory(
     ]
 
     report.total_files = len(json_files)
-    logger.info("Found %d raw output files in %s", report.total_files, raw_dir)
+    logger.info("Found %d raw chunk files in %s", report.total_files, raw_dir)
 
+    # ------------------------------------------------------------------ #
+    # Step 1 — load all wrappers and group by group_id                    #
+    # ------------------------------------------------------------------ #
+    from collections import defaultdict
+    groups: Dict[str, List[dict]] = defaultdict(list)
+
+    for json_file in tqdm(json_files, desc="Loading chunk wrappers"):
+        wrapper = _load_wrapper(json_file, report, logger)
+        if wrapper is None:
+            continue
+        wrapper["_source_file"] = str(json_file)
+        gid = wrapper.get("group_id") or wrapper.get("transcript_id", "unknown")
+        groups[gid].append(wrapper)
+
+    logger.info(
+        "Loaded wrappers for %d groups (%d files).",
+        len(groups), report.total_files - len(report.failures),
+    )
+
+    # ------------------------------------------------------------------ #
+    # Step 2 — reassemble chunks per group and build output rows          #
+    # ------------------------------------------------------------------ #
     rows: List[dict] = []
 
-    for json_file in tqdm(json_files, desc="Parsing HF outputs"):
-        # ---------------------------------------------------------------- #
-        # Load wrapper                                                      #
-        # ---------------------------------------------------------------- #
-        try:
-            wrapper = json.loads(json_file.read_text(encoding="utf-8"))
-        except Exception as exc:
-            report.failures.append(ParseFailure(
-                json_file=str(json_file),
-                transcript_id=None, group_id=None,
-                model_name=None, mode=None,
-                failure_type=FAILURE_JSON_DECODE,
-                detail=f"Wrapper load failed: {exc}",
-            ))
-            logger.warning("Could not load wrapper %s: %s", json_file.name, exc)
-            continue
+    for group_id, wrappers in tqdm(groups.items(), desc="Reassembling chunks"):
+        # Sort by chunk_index; default to 0 for legacy single-chunk wrappers
+        wrappers.sort(key=lambda w: w.get("chunk_index", 0))
 
-        tid        = wrapper.get("transcript_id")
-        uid        = wrapper.get("utterance_id")
-        group_id   = wrapper.get("group_id", tid)
-        model_name = wrapper.get("model_name", "hf_model")
-        model_key  = wrapper.get("model_key", "unknown")
-        mode       = wrapper.get("mode", "unknown")
-        seed       = wrapper.get("seed", None)
-        resp_text  = wrapper.get("response_text", "")
+        tid        = wrappers[0].get("transcript_id")
+        uid        = wrappers[0].get("utterance_id")
+        model_name = wrappers[0].get("model_name", "hf_model")
+        model_key  = wrappers[0].get("model_key", "unknown")
+        mode       = wrappers[0].get("mode", "unknown")
+        seed       = wrappers[0].get("seed", None)
+        n_chunks_expected = wrappers[0].get("n_chunks", 1)
 
-        # ---------------------------------------------------------------- #
-        # Extract and validate JSON array from model response               #
-        # ---------------------------------------------------------------- #
-        preds, failure_type = extract_json_array(resp_text)
-
-        if failure_type:
-            report.failures.append(ParseFailure(
-                json_file=str(json_file),
-                transcript_id=tid, group_id=group_id,
-                model_name=model_name, mode=mode,
-                failure_type=failure_type,
-                detail=resp_text[:200],  # first 200 chars for diagnostics
-            ))
+        if len(wrappers) != n_chunks_expected:
             logger.warning(
-                "Parse failure [%s] — file=%s group=%s",
-                failure_type, json_file.name, group_id,
+                "Group %s: expected %d chunks, found %d. "
+                "Some chunks may be missing.",
+                group_id, n_chunks_expected, len(wrappers),
             )
-            continue
 
-        preds, val_failure = validate_records(preds)
-        if val_failure:
-            report.failures.append(ParseFailure(
-                json_file=str(json_file),
-                transcript_id=tid, group_id=group_id,
-                model_name=model_name, mode=mode,
-                failure_type=FAILURE_MISSING_FIELDS,
-                detail=val_failure,
-            ))
-            logger.warning(
-                "Validation failure [%s] — file=%s group=%s",
-                val_failure, json_file.name, group_id,
-            )
-            continue
+        # ---- Parse each chunk, align by token_index ------------------- #
+        # Maps original token_index → predicted record
+        token_pred_map: Dict[int, dict] = {}
 
-        # ---------------------------------------------------------------- #
-        # Token-count mismatch check                                       #
-        # ---------------------------------------------------------------- #
-        if uid is not None:
-            gt_group = labeled[
-                (labeled["transcript_id"] == tid) &
-                (labeled["utterance_id"]   == uid)
-            ]
-        else:
-            gt_group = labeled[labeled["transcript_id"] == tid]
+        for wrapper in wrappers:
+            chunk_id      = wrapper.get("chunk_id", group_id)
+            token_indices = wrapper.get("token_indices")  # list or None (legacy)
+            resp_text     = wrapper.get("response_text", "")
+            source_file   = wrapper["_source_file"]
 
-        if len(preds) != len(gt_group):
-            preds = handle_mismatch(
-                preds=preds,
-                gt_tokens=gt_group,
-                strategy=mismatch_strategy,
-                report=report,
-                group_id=group_id,
-                logger=logger,
-            )
-            if preds is None:
+            preds, failure_type = extract_json_array(resp_text)
+
+            if failure_type:
                 report.failures.append(ParseFailure(
-                    json_file=str(json_file),
+                    json_file=source_file,
                     transcript_id=tid, group_id=group_id,
                     model_name=model_name, mode=mode,
-                    failure_type=FAILURE_TOKEN_MISMATCH,
-                    detail=(
-                        f"pred={len(preds) if preds else '?'} "
-                        f"gt={len(gt_group)} strategy=drop"
-                    ),
+                    failure_type=failure_type,
+                    detail=resp_text[:200],
                 ))
+                logger.warning(
+                    "Parse failure [%s] — chunk=%s group=%s",
+                    failure_type, chunk_id, group_id,
+                )
                 continue
 
+            preds, val_failure = validate_records(preds)
+            if val_failure:
+                report.failures.append(ParseFailure(
+                    json_file=source_file,
+                    transcript_id=tid, group_id=group_id,
+                    model_name=model_name, mode=mode,
+                    failure_type=FAILURE_MISSING_FIELDS,
+                    detail=val_failure,
+                ))
+                logger.warning(
+                    "Validation failure [%s] — chunk=%s group=%s",
+                    val_failure, chunk_id, group_id,
+                )
+                continue
+
+            # Chunk-level mismatch check
+            if token_indices is not None:
+                expected_n = len(token_indices)
+                if len(preds) != expected_n:
+                    preds = handle_mismatch(
+                        preds=preds,
+                        gt_tokens=pd.DataFrame({"token_index": token_indices}),
+                        strategy=mismatch_strategy,
+                        report=report,
+                        group_id=chunk_id,
+                        logger=logger,
+                    )
+                    if preds is None:
+                        report.failures.append(ParseFailure(
+                            json_file=source_file,
+                            transcript_id=tid, group_id=group_id,
+                            model_name=model_name, mode=mode,
+                            failure_type=FAILURE_TOKEN_MISMATCH,
+                            detail=f"chunk={chunk_id} pred={len(preds) if preds else '?'} expected={expected_n} strategy=drop",
+                        ))
+                        continue
+
+                # Align predictions to original token indices by position
+                for orig_idx, pred in zip(token_indices, preds):
+                    token_pred_map[orig_idx] = pred
+            else:
+                # Legacy wrapper: no token_indices — use pred["index"] directly
+                for pred in preds:
+                    token_pred_map[int(pred["index"])] = pred
+
+        if not token_pred_map:
+            logger.warning("Group %s produced no usable predictions.", group_id)
+            continue
+
         # ---------------------------------------------------------------- #
-        # Build rows                                                        #
+        # Build output rows — one per successfully predicted token          #
         # ---------------------------------------------------------------- #
         report.success += 1
-        for p in preds:
+        for orig_idx, p in sorted(token_pred_map.items()):
             rows.append(
                 {
                     "transcript_id":  tid,
@@ -386,7 +453,7 @@ def parse_directory(
                     "model_key":      model_key,
                     "mode":           mode,
                     "seed":           seed,
-                    "pred_index":     int(p["index"]),
+                    "pred_index":     orig_idx,
                     "pred_token":     p["token"],
                     "pred_word_label":int(p["word_label"]),
                     "pred_ciu_label": int(p["ciu_label"]),

@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 __author__ = "Jason M. Pittman"
-__copyright__ = "Copyright 2026"
+__copyright__ = "Copyright 2025"
 __credits__ = ["Jason M. Pittman"]
 __license__ = "Apache License 2.0"
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 __maintainer__ = "Jason M. Pittman"
 __status__ = "Research"
 
@@ -197,6 +197,109 @@ def get_model_config(cfg: "Config", model_key: str) -> dict:
             f"Unknown model_key '{model_key}'. Available: {list(models.keys())}"
         )
     return models[model_key]
+
+
+# ---------------------------------------------------------------------------
+# Transcript chunking
+# ---------------------------------------------------------------------------
+
+def chunk_transcript(
+    group_df: "pd.DataFrame",
+    chunk_size: int,
+    transcript_id: str,
+    utterance_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Split a single transcript (or utterance) DataFrame into fixed-size chunks.
+
+    This is the primary mechanism for keeping inputs within the context window
+    of resource-constrained models.  Each chunk is a contiguous, non-overlapping
+    slice of tokens ordered by token_index.
+
+    Args:
+        group_df:      DataFrame slice for one transcript / utterance, sorted
+                       by token_index.
+        chunk_size:    Maximum number of tokens per chunk.
+        transcript_id: Parent transcript identifier — embedded in chunk metadata.
+        utterance_id:  Parent utterance identifier if grouping at utterance level,
+                       else None.
+
+    Returns:
+        List of chunk dicts, each containing:
+            ``chunk_id``       — "{group_id}__chunk{n}" (zero-padded, 3 digits)
+            ``group_id``       — parent group identifier
+            ``transcript_id``  — parent transcript_id
+            ``utterance_id``   — parent utterance_id (may be None)
+            ``chunk_index``    — zero-based chunk number within this group
+            ``n_chunks``       — total number of chunks for this group
+            ``token_start``    — first token_index in this chunk
+            ``token_end``      — last token_index in this chunk (inclusive)
+            ``tokens``         — list of token_text strings
+            ``token_indices``  — list of original token_index values
+
+    Example::
+
+        chunks = chunk_transcript(g, chunk_size=50, transcript_id="CR_005")
+        for c in chunks:
+            token_block = build_token_block_from_chunk(c)
+    """
+    group_df = group_df.sort_values("token_index").reset_index(drop=True)
+
+    group_id = (
+        f"{transcript_id}__utt-{utterance_id}"
+        if utterance_id is not None
+        else transcript_id
+    )
+
+    rows      = group_df.to_dict("records")
+    n_tokens  = len(rows)
+    n_chunks  = max(1, (n_tokens + chunk_size - 1) // chunk_size)
+    chunks: List[Dict[str, Any]] = []
+
+    for i in range(n_chunks):
+        start  = i * chunk_size
+        end    = min(start + chunk_size, n_tokens)
+        slice_ = rows[start:end]
+
+        chunk_id = f"{group_id}__chunk{i:03d}"
+
+        chunks.append(
+            {
+                "chunk_id":      chunk_id,
+                "group_id":      group_id,
+                "transcript_id": transcript_id,
+                "utterance_id":  utterance_id,
+                "chunk_index":   i,
+                "n_chunks":      n_chunks,
+                "token_start":   slice_[0]["token_index"],
+                "token_end":     slice_[-1]["token_index"],
+                "tokens":        [r["token_text"] for r in slice_],
+                "token_indices": [r["token_index"] for r in slice_],
+            }
+        )
+
+    return chunks
+
+
+def build_token_block_from_chunk(chunk: Dict[str, Any]) -> str:
+    """
+    Build the numbered token block string for a chunk dict returned by
+    :func:`chunk_transcript`.
+
+    Token numbers reflect the *original* token_index values from the dataset
+    so that the model's output indices can be matched back to ground truth
+    without offset arithmetic.
+
+    Args:
+        chunk: A chunk dict as returned by :func:`chunk_transcript`.
+
+    Returns:
+        Multi-line string of the form ``"{token_index}: {token_text}\\n..."``.
+    """
+    return "\n".join(
+        f"{idx}: {tok}"
+        for idx, tok in zip(chunk["token_indices"], chunk["tokens"])
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -6,22 +6,35 @@ __author__ = "Jason M. Pittman"
 __copyright__ = "Copyright 2026"
 __credits__ = ["Jason M. Pittman"]
 __license__ = "Apache License 2.0"
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 __maintainer__ = "Jason M. Pittman"
 __status__ = "Research"
 
 """
 Run a local Hugging Face LLM (optionally with LoRA adapters) on the evaluation
-split and save raw per-group outputs as JSON.
+split and save raw per-chunk outputs as JSON.
 
-Changes from v0.1.0
+Chunking strategy
+-----------------
+Transcripts are split into non-overlapping, contiguous chunks of at most
+--chunk-size tokens before being passed to the model.  This keeps every input
+well within the context window of resource-constrained 7-8B models (max_seq
+768-1024).  Token indices in each chunk reflect the *original* token_index
+values from the dataset, so the downstream parser can reassemble chunks into
+full transcripts and align predictions to ground truth without offset
+arithmetic.
+
+One JSON wrapper file is written per chunk (not per transcript), named
+<group_id>__chunk<NNN>.json.  The wrapper carries enough metadata for the
+parser to reconstruct chunk order and provenance.
+
+Changes from v0.2.1
 -------------------
-- All print() calls replaced with structured logger (setup_logger).
-- seed written into every output JSON wrapper so downstream parsers and
-  compute_metrics can group by seed without relying on directory paths.
-- --few-shot-strategy flag added (random | severity_stratified) to support
-  Ablation B in run_all.sh.
-- save_run_metadata() sidecar written to the output directory on completion.
+- Chunking via chunk_transcript() / build_token_block_from_chunk() from utils.
+- --chunk-size CLI flag (default 50).
+- seed written into every output JSON wrapper (carried forward from v0.2.1).
+- --few-shot-strategy flag (carried forward from v0.2.1).
+- save_run_metadata() sidecar (carried forward from v0.2.1).
 """
 
 from pathlib import Path
@@ -39,6 +52,8 @@ from utils import (
     set_global_seed,
     get_model_config,
     build_few_shot_block,
+    chunk_transcript,
+    build_token_block_from_chunk,
     setup_logger,
 )
 
@@ -53,13 +68,7 @@ def load_prompts_yaml(path: Path) -> Dict[str, str]:
     import yaml
     with path.open("r") as f:
         data = yaml.safe_load(f)
-    system  = data["system"]
-    prompts = data["prompts"]
-    return {"system": system, **prompts}
-
-
-def build_token_block(tokens: List[str]) -> str:
-    return "\n".join(f"{i}: {tok}" for i, tok in enumerate(tokens))
+    return {"system": data["system"], **data["prompts"]}
 
 
 def load_hf_model_and_tokenizer(
@@ -71,8 +80,7 @@ def load_hf_model_and_tokenizer(
 ):
     """
     Load a local HF CausalLM + tokenizer, optionally with LoRA adapters.
-    Targets Apple Silicon (MPS) or CPU; CUDA will be used automatically if
-    available via the pipeline default device selection.
+    Device priority: CUDA > MPS > CPU.
     """
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
@@ -83,7 +91,6 @@ def load_hf_model_and_tokenizer(
         device = "mps"
     else:
         device = "cpu"
-
     logger.info("Device selected: %s", device)
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -109,7 +116,6 @@ def load_hf_model_and_tokenizer(
         temperature=0.001,
         top_p=1.0,
     )
-
     return text_gen, tokenizer
 
 
@@ -117,9 +123,8 @@ def choose_grouping_cols(df: pd.DataFrame, logger) -> Tuple[List[str], bool]:
     if "utterance_id" in df.columns:
         logger.info("Grouping by (transcript_id, utterance_id).")
         return ["transcript_id", "utterance_id"], True
-    else:
-        logger.info("No 'utterance_id' column — grouping by transcript_id only.")
-        return ["transcript_id"], False
+    logger.info("No 'utterance_id' column — grouping by transcript_id only.")
+    return ["transcript_id"], False
 
 
 # ---------------------------------------------------------------------------
@@ -133,7 +138,7 @@ def main(
     ),
     model_key: str = typer.Option(
         "phi3-mini",
-        help="Key in config.yaml under 'models' to use for this run.",
+        help="Key in config.yaml under 'models'.",
     ),
     mode: str = typer.Option(
         "z_shot_local",
@@ -145,55 +150,56 @@ def main(
     ),
     use_lora: bool = typer.Option(
         False,
-        help="If true, load LoRA adapters for this model (PEFT).",
+        help="Load LoRA adapters for this model (PEFT).",
     ),
     adapter_dir: Optional[Path] = typer.Option(
         None,
         help=(
-            "Directory containing LoRA adapters. "
+            "LoRA adapter directory. "
             "Defaults to models/llm/<model_key>-ciu-lora if --use-lora is set."
         ),
     ),
     n_few_shot: int = typer.Option(
         3,
-        help="Number of few-shot examples when using few_shot_* modes.",
+        help="Number of few-shot examples for few_shot_* modes.",
     ),
     few_shot_strategy: str = typer.Option(
         "random",
+        help="Few-shot selection strategy: 'random' or 'severity_stratified'.",
+    ),
+    chunk_size: int = typer.Option(
+        50,
         help=(
-            "Few-shot example selection strategy: "
-            "'random' (default) or 'severity_stratified'. "
-            "Used by Ablation B."
+            "Maximum tokens per chunk. Transcripts longer than this are split "
+            "into contiguous non-overlapping chunks before inference. "
+            "Set to 0 to disable chunking (not recommended for 7-8B models)."
         ),
     ),
     seed: int = typer.Option(2025, help="Random seed."),
-    log_dir: Path = typer.Option(
-        Path("log"), help="Directory for log files."
-    ),
+    log_dir: Path = typer.Option(Path("log"), help="Directory for log files."),
 ) -> None:
     """
-    Run a local HF LLM on the evaluation split and save raw outputs.
+    Run a local HF LLM on the evaluation split and save raw chunk outputs.
 
-    For modes starting with 'few_shot', a few-shot block is auto-generated
-    from the prompt-support set using the specified --few-shot-strategy.
-    Each output JSON wrapper includes the seed so downstream scripts can
-    group results by seed without path parsing.
+    Each transcript is chunked into segments of at most --chunk-size tokens.
+    One JSON wrapper is written per chunk, carrying enough metadata for the
+    downstream parser to reassemble predictions into full-transcript sequences.
     """
     logger = setup_logger(
         f"run_llm_inference__{model_key}__{mode}__seed{seed}",
         log_dir=log_dir,
     )
     logger.info(
-        "Starting inference — model_key=%s  mode=%s  seed=%d  use_lora=%s  "
-        "few_shot_strategy=%s",
-        model_key, mode, seed, use_lora, few_shot_strategy,
+        "Starting inference — model_key=%s  mode=%s  seed=%d  "
+        "use_lora=%s  chunk_size=%d  few_shot_strategy=%s",
+        model_key, mode, seed, use_lora, chunk_size, few_shot_strategy,
     )
 
     set_global_seed(seed)
     cfg = Config.load(config_path)
 
-    model_cfg     = get_model_config(cfg, model_key)
-    model_name    = model_cfg["model_name"]
+    model_cfg      = get_model_config(cfg, model_key)
+    model_name     = model_cfg["model_name"]
     max_new_tokens = int(model_cfg.get("max_new_tokens", 2048))
 
     if use_lora and adapter_dir is None:
@@ -244,7 +250,6 @@ def main(
         )
         if few_shot_meta:
             save_json(few_shot_meta, out_dir / "few_shot_examples_metadata.json")
-            logger.debug("Few-shot metadata saved.")
 
     # ------------------------------------------------------------------ #
     # Load model                                                           #
@@ -260,11 +265,12 @@ def main(
     logger.info("Model loaded.")
 
     # ------------------------------------------------------------------ #
-    # Inference loop                                                       #
+    # Inference loop — iterate groups, chunk each, run per chunk          #
     # ------------------------------------------------------------------ #
-    n_groups  = df_eval.groupby(group_cols).ngroups
-    n_success = 0
-    n_error   = 0
+    n_groups       = df_eval.groupby(group_cols).ngroups
+    n_chunks_total = 0
+    n_success      = 0
+    n_error        = 0
 
     for group_vals, g in tqdm(
         df_eval.groupby(group_cols),
@@ -278,62 +284,93 @@ def main(
             transcript_id = group_vals
             utterance_id  = None
 
-        tokens      = g["token_text"].tolist()
-        token_block = build_token_block(tokens)
-        group_id    = (
+        group_id = (
             f"{transcript_id}__utt-{utterance_id}"
             if has_utter and utterance_id is not None
             else transcript_id
         )
 
-        rendered_user = user_template.render(
-            utterance_id=group_id,
+        # ---- Chunk the group ----------------------------------------- #
+        effective_chunk_size = chunk_size if chunk_size > 0 else len(g)
+        chunks = chunk_transcript(
+            group_df=g,
+            chunk_size=effective_chunk_size,
             transcript_id=transcript_id,
-            token_block=token_block,
-            few_shot_examples=few_shot_text,
+            utterance_id=utterance_id,
         )
 
-        prompt = (
-            "SYSTEM MESSAGE:\n"
-            f"{system_prompt}\n\n"
-            "USER MESSAGE:\n"
-            f"{rendered_user}\n"
-        )
+        if len(chunks) > 1:
+            logger.debug(
+                "Chunked %s (%d tokens) into %d chunks of ≤%d.",
+                group_id, len(g), len(chunks), effective_chunk_size,
+            )
 
-        try:
-            gen = text_gen(prompt)[0]["generated_text"]
-            n_success += 1
-        except Exception as exc:
-            logger.error("Inference failed for group %s: %s", group_id, exc)
-            n_error += 1
-            continue
+        n_chunks_total += len(chunks)
 
-        save_json(
-            {
-                "transcript_id": transcript_id,
-                "utterance_id":  utterance_id,
-                "group_id":      group_id,
-                "mode":          mode,
-                "model_name":    model_name,
-                "model_key":     model_key,
-                "seed":          seed,
-                "use_lora":      use_lora,
-                "adapter_dir":   str(adapter_dir) if adapter_dir is not None else None,
-                "few_shot_strategy": few_shot_strategy,
-                "n_few_shot":    n_few_shot,
-                "response_text": gen,
-            },
-            out_dir / f"{group_id}.json",
-        )
+        # ---- Run inference on each chunk ----------------------------- #
+        for chunk in chunks:
+            token_block = build_token_block_from_chunk(chunk)
+
+            rendered_user = user_template.render(
+                utterance_id=chunk["chunk_id"],
+                transcript_id=transcript_id,
+                token_block=token_block,
+                few_shot_examples=few_shot_text,
+            )
+
+            prompt = (
+                "SYSTEM MESSAGE:\n"
+                f"{system_prompt}\n\n"
+                "USER MESSAGE:\n"
+                f"{rendered_user}\n"
+            )
+
+            try:
+                gen = text_gen(prompt)[0]["generated_text"]
+                n_success += 1
+            except Exception as exc:
+                logger.error(
+                    "Inference failed for chunk %s: %s",
+                    chunk["chunk_id"], exc,
+                )
+                n_error += 1
+                continue
+
+            save_json(
+                {
+                    # Chunk provenance — used by parser to reassemble
+                    "transcript_id":  transcript_id,
+                    "utterance_id":   utterance_id,
+                    "group_id":       group_id,
+                    "chunk_id":       chunk["chunk_id"],
+                    "chunk_index":    chunk["chunk_index"],
+                    "n_chunks":       chunk["n_chunks"],
+                    "token_start":    chunk["token_start"],
+                    "token_end":      chunk["token_end"],
+                    "token_indices":  chunk["token_indices"],
+                    # Run metadata
+                    "mode":           mode,
+                    "model_name":     model_name,
+                    "model_key":      model_key,
+                    "seed":           seed,
+                    "use_lora":       use_lora,
+                    "adapter_dir":    str(adapter_dir) if adapter_dir else None,
+                    "few_shot_strategy": few_shot_strategy,
+                    "n_few_shot":     n_few_shot,
+                    "chunk_size":     chunk_size,
+                    # Model output
+                    "response_text":  gen,
+                },
+                out_dir / f"{chunk['chunk_id']}.json",
+            )
 
     logger.info(
-        "Inference complete — success=%d  errors=%d  total=%d",
-        n_success, n_error, n_groups,
+        "Inference complete — groups=%d  chunks=%d  success=%d  errors=%d",
+        n_groups, n_chunks_total, n_success, n_error,
     )
-
     if n_error > 0:
         logger.warning(
-            "%d groups failed inference and were skipped. "
+            "%d chunks failed inference and were skipped. "
             "Review log for details.",
             n_error,
         )
@@ -351,7 +388,9 @@ def main(
         adapter_dir=str(adapter_dir) if adapter_dir else None,
         n_few_shot=n_few_shot,
         few_shot_strategy=few_shot_strategy,
+        chunk_size=chunk_size,
         n_groups=n_groups,
+        n_chunks_total=n_chunks_total,
         n_success=n_success,
         n_error=n_error,
     )

@@ -33,6 +33,20 @@
 -- mismatches are explicitly detected, logged with the delta, and handled via a configurable --mismatch-strategy: drop (default, safe for metric computation) or truncate (for exploratory use, with a note to flag in the paper if used). The count of dropped and truncated tokens is tracked and reported.  
 -- A warning is emitted if the failure rate exceeds 10%, since at that level the metrics are materially affected and the paper should note it explicitly.  
 
+**run_llm_inference.py**
+-- Logger — named run_llm_inference__{model_key}__{mode}__seed{seed} so each combination gets its own timestamped log file. This matters at scale: with 60 cells running you want to be able to open a single log and see exactly what happened for llama3-8b / few_shot_local / seed2027 without grepping through a monolithic file.  
+-- seed written into every output JSON — this was the critical missing link for compute_metrics.py to group by seed. Previously the seed was only recoverable from the directory path, which is fragile.  
+-- --few-shot-strategy flag — wires in the strategy parameter added to build_few_shot_block() in utils.py. run_all.sh already passes --few-shot-strategy in the Ablation B loop; this makes the CLI accept it.  
+-- Inference error handling — the generation call is now wrapped in try/except. Failed groups are counted and logged rather than crashing the whole run, and the final summary reports success / error / total so you know immediately if any groups were skipped.  
+-- CUDA device support — priority is now CUDA > MPS > CPU, consistent with running on a GPU server rather than just Apple Silicon.  
+
+
+**finetune_llm.py**
+-- Logger — named finetune_llm__{model_key}__seed{seed}, written to log/ alongside inference logs.  
+save_run_metadata() — written to adapter_dir/finetune_metadata.json so every saved checkpoint is self-describing: you can open any adapter directory and immediately know what model, seed, hyperparameters, and number of training examples produced it.  
+-- TrainConfig logging — all hyperparameters are logged at INFO level before training starts, giving you a clean record of the exact configuration used for each fine-tuning run.  
+
+
 ### Removed
 
 

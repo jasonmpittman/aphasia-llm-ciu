@@ -46,6 +46,8 @@
 save_run_metadata() — written to adapter_dir/finetune_metadata.json so every saved checkpoint is self-describing: you can open any adapter directory and immediately know what model, seed, hyperparameters, and number of training examples produced it.  
 -- TrainConfig logging — all hyperparameters are logged at INFO level before training starts, giving you a clean record of the exact configuration used for each fine-tuning run.  
 
+**others**
+-- added structured logging, run metadata sidecars, and consistent error handling throughout.
 
 ### Removed
 

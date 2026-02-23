@@ -113,9 +113,10 @@ def load_hf_model_and_tokenizer(
         model=model,
         tokenizer=tokenizer,
         max_new_tokens=max_new_tokens,
-        temperature=0.001,
-        top_p=1.0,
-        return_full_text=False,  # return completion only, not prompt + completion
+        do_sample=False,       # greedy decoding — deterministic, numerically stable,
+                               # and correct for reproducible scientific inference.
+                               # temperature/top_p are irrelevant when do_sample=False.
+        return_full_text=False,
     )
     return text_gen, tokenizer
 

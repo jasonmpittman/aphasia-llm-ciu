@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-24-02
+-- apply_chat_template() now wraps the messages in the model-specific special tokens that activate instruction-following mode.  
+
+## [0.2.5] - 2026-23-02
+-- modified ciu_prompts.yaml and associated methods to refine cross model zoo prompt structures to avoid truncation issues.
+
 ## [0.2.4] - 2026-23-02
 -- torch_dtype per device. CUDA gets float16 (safe and memory-efficient), MPS and CPU both get float32. Llama-3.1's model config requests bfloat16 by default, but MPS bfloat16 support is incomplete before PyTorch 2.4 and CPU bfloat16 ops are unreliable — both cause the integral conversion overflow you saw.  
 -- device_map=None. Without this, from_pretrained can trigger automatic device mapping that re-introduces bfloat16 on MPS regardless of what you pass as torch_dtype. Explicit to(device) after loading is the safe pattern.  

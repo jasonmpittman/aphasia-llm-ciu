@@ -6,7 +6,7 @@ __author__ = "Jason M. Pittman"
 __copyright__ = "Copyright 2026"
 __credits__ = ["Jason M. Pittman"]
 __license__ = "Apache License 2.0"
-__version__ = "0.2.3"
+__version__ = "0.2.4"
 __maintainer__ = "Jason M. Pittman"
 __status__ = "Research"
 
@@ -81,23 +81,47 @@ def load_hf_model_and_tokenizer(
     """
     Load a local HF CausalLM + tokenizer, optionally with LoRA adapters.
     Device priority: CUDA > MPS > CPU.
+
+    dtype selection
+    ---------------
+    Models like Llama-3.1 declare bfloat16 as their preferred dtype, but
+    bfloat16 is not fully supported on MPS or CPU and causes an
+    "out of range integral type conversion" error during generation.
+    We therefore select dtype explicitly per device:
+      - CUDA : torch.float16  (bfloat16 also works on Ampere+, but float16
+                               is universally safe and memory-efficient)
+      - MPS  : torch.float32  (MPS bfloat16 support is incomplete pre-PyTorch 2.4)
+      - CPU  : torch.float32  (bfloat16 CPU ops are slow and often unsupported)
     """
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 
     if torch.cuda.is_available():
         device = "cuda"
+        torch_dtype = torch.float16
     elif torch.backends.mps.is_available():
         device = "mps"
+        torch_dtype = torch.float32
     else:
         device = "cpu"
-    logger.info("Device selected: %s", device)
+        torch_dtype = torch.float32
+    logger.info("Device selected: %s  torch_dtype: %s", device, torch_dtype)
 
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    # Cap sequence length to the model's trained maximum to prevent position
+    # embedding overflow on long prompts.
+    if tokenizer.model_max_length > 1_000_000:
+        # Some tokenizers ship with a sentinel value of 1e30; clamp it.
+        tokenizer.model_max_length = 4096
+        logger.debug("Clamped tokenizer.model_max_length to 4096.")
 
-    model = AutoModelForCausalLM.from_pretrained(model_name)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        torch_dtype=torch_dtype,
+        device_map=None,   # explicit .to(device) below; avoids auto-mapping
+    )                      # that can re-introduce bfloat16 on MPS
 
     if use_lora:
         if adapter_dir is None:
@@ -115,7 +139,6 @@ def load_hf_model_and_tokenizer(
         max_new_tokens=max_new_tokens,
         do_sample=False,       # greedy decoding — deterministic, numerically stable,
                                # and correct for reproducible scientific inference.
-                               # temperature/top_p are irrelevant when do_sample=False.
         return_full_text=False,
     )
     return text_gen, tokenizer

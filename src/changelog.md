@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-23-02
+-- torch_dtype per device. CUDA gets float16 (safe and memory-efficient), MPS and CPU both get float32. Llama-3.1's model config requests bfloat16 by default, but MPS bfloat16 support is incomplete before PyTorch 2.4 and CPU bfloat16 ops are unreliable — both cause the integral conversion overflow you saw.  
+-- device_map=None. Without this, from_pretrained can trigger automatic device mapping that re-introduces bfloat16 on MPS regardless of what you pass as torch_dtype. Explicit to(device) after loading is the safe pattern.  
+-- use_fast=True and model_max_length clamp. Llama-3.1's tokenizer ships with a sentinel model_max_length of 1e30. Some transformers versions interpret this literally when allocating attention mask tensors, which can also cause overflow. Clamping to 4096 matches the model's actual context window.  
+
 ## [0.2.3] - 2026-23-02
 -- adjusted max_new_tokens, min_chunk_size in config.yaml, utils.py, and run_llm_inference.py to fix response truncation.
 

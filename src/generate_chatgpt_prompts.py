@@ -6,7 +6,7 @@ __author__ = "Jason M. Pittman"
 __copyright__ = "Copyright 2026"
 __credits__ = ["Jason M. Pittman"]
 __license__ = "Apache License 2.0"
-__version__ = "0.2.1"
+__version__ = "0.2.3"
 __maintainer__ = "Jason M. Pittman"
 __status__ = "Research"
 
@@ -54,8 +54,12 @@ def load_prompts_yaml(path: Path) -> Dict[str, str]:
     return {"system": system, **prompts}
 
 
-def build_token_block(tokens: List[str]) -> str:
-    return "\n".join(f"{i}: {tok}" for i, tok in enumerate(tokens))
+def build_token_block(tokens: List[str], start_index: int = 0) -> str:
+    """Render tokens as a two-column INDEX | TOKEN table, matching the HF prompt format."""
+    return "\n".join(
+        f"{start_index + i:<6}| {tok}"
+        for i, tok in enumerate(tokens)
+    )
 
 
 def choose_grouping_cols(df: pd.DataFrame, logger) -> Tuple[List[str], bool]:
@@ -173,7 +177,9 @@ def main(
             utterance_id  = None
 
         tokens      = g["token_text"].tolist()
-        token_block = build_token_block(tokens)
+        token_start = int(g["token_index"].min()) if "token_index" in g.columns else 0
+        token_end   = int(g["token_index"].max()) if "token_index" in g.columns else len(tokens) - 1
+        token_block = build_token_block(tokens, start_index=token_start)
         group_id    = (
             f"{transcript_id}__utt-{utterance_id}"
             if has_utter and utterance_id is not None
@@ -184,6 +190,9 @@ def main(
             utterance_id=group_id,
             transcript_id=transcript_id,
             token_block=token_block,
+            token_count=len(tokens),
+            token_start=token_start,
+            token_end=token_end,
             few_shot_examples=few_shot_text,
         )
 

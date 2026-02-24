@@ -6,7 +6,7 @@ __author__ = "Jason M. Pittman"
 __copyright__ = "Copyright 2025"
 __credits__ = ["Jason M. Pittman"]
 __license__ = "Apache License 2.0"
-__version__ = "0.2.3"
+__version__ = "0.2.4"
 __maintainer__ = "Jason M. Pittman"
 __status__ = "Research"
 
@@ -294,21 +294,28 @@ def chunk_transcript(
 
 def build_token_block_from_chunk(chunk: Dict[str, Any]) -> str:
     """
-    Build the numbered token block string for a chunk dict returned by
+    Build the token block string for a chunk dict returned by
     :func:`chunk_transcript`.
 
-    Token numbers reflect the *original* token_index values from the dataset
-    so that the model's output indices can be matched back to ground truth
-    without offset arithmetic.
+    Renders as a two-column table (INDEX | TOKEN) rather than a plain
+    numbered list.  The table format is unambiguous to instruction-tuned
+    LLMs — it cannot be mistaken for a list that should be continued,
+    which was a key failure mode of the previous "{index}: {token}" format.
+
+    Token indices reflect the *original* token_index values from the dataset
+    so that the model's output indices align directly with ground truth without
+    offset arithmetic.
 
     Args:
         chunk: A chunk dict as returned by :func:`chunk_transcript`.
 
     Returns:
-        Multi-line string of the form ``"{token_index}: {token_text}\\n..."``.
+        Multi-line string of the form::\n\n
+            {token_index:<6}| {token_text}\n
+            ...
     """
     return "\n".join(
-        f"{idx}: {tok}"
+        f"{idx:<6}| {tok}"
         for idx, tok in zip(chunk["token_indices"], chunk["tokens"])
     )
 

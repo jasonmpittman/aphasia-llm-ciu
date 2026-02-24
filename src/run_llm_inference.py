@@ -6,7 +6,7 @@ __author__ = "Jason M. Pittman"
 __copyright__ = "Copyright 2026"
 __credits__ = ["Jason M. Pittman"]
 __license__ = "Apache License 2.0"
-__version__ = "0.2.4"
+__version__ = "0.2.5"
 __maintainer__ = "Jason M. Pittman"
 __status__ = "Research"
 
@@ -347,6 +347,9 @@ def main(
                 utterance_id=chunk["chunk_id"],
                 transcript_id=transcript_id,
                 token_block=token_block,
+                token_count=len(chunk["token_indices"]),
+                token_start=chunk["token_start"],
+                token_end=chunk["token_end"],
                 few_shot_examples=few_shot_text,
             )
 

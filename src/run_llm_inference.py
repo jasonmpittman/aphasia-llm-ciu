@@ -6,7 +6,7 @@ __author__ = "Jason M. Pittman"
 __copyright__ = "Copyright 2026"
 __credits__ = ["Jason M. Pittman"]
 __license__ = "Apache License 2.0"
-__version__ = "0.2.5"
+__version__ = "0.2.6"
 __maintainer__ = "Jason M. Pittman"
 __status__ = "Research"
 
@@ -286,7 +286,7 @@ def main(
     # Load model                                                           #
     # ------------------------------------------------------------------ #
     logger.info("Loading model %s ...", model_name)
-    text_gen, _ = load_hf_model_and_tokenizer(
+    text_gen, tokenizer = load_hf_model_and_tokenizer(
         model_name=model_name,
         max_new_tokens=max_new_tokens,
         use_lora=use_lora,
@@ -353,11 +353,18 @@ def main(
                 few_shot_examples=few_shot_text,
             )
 
-            prompt = (
-                "SYSTEM MESSAGE:\n"
-                f"{system_prompt}\n\n"
-                "USER MESSAGE:\n"
-                f"{rendered_user}\n"
+            # Format using the model's chat template so instruction-following
+            # mode is properly activated.  Without this, the model receives
+            # plain text and treats the prompt as a document to complete rather
+            # than instructions to follow — causing table/list continuation.
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user",   "content": rendered_user},
+            ]
+            prompt = tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
             )
 
             try:

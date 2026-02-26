@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-25-02
+-- updated ciu_prompts.yaml and config.yaml to extend max_new_tokens and modify prompt format to not truncate.
+
 ## [0.2.6] - 2026-24-02
 -- apply_chat_template() now wraps the messages in the model-specific special tokens that activate instruction-following mode.  
 

@@ -32,12 +32,16 @@ system: |
       unless they are part of a multi-word unit where omitting them changes meaning
       about the scene (rare — default to 0).
 
-  OUTPUT FORMAT: Respond with ONLY a valid JSON array. No prose before or after.
-  Each element must have exactly these four fields:
+  OUTPUT FORMAT:
+  - Your ENTIRE response must be a single valid JSON array. Nothing else.
+  - Do NOT write any reasoning, explanation, preamble, or commentary.
+  - Do NOT write anything before the opening [ bracket.
+  - Do NOT write anything after the closing ] bracket.
+  - Each element must have exactly these four fields:
     {"index": <original_index>, "token": "<token_text>", "word_label": <0|1>, "ciu_label": <0|1>}
-
-  You MUST output exactly one object per input token, preserving the original index
-  values. Do not add, remove, reorder, or rename tokens.
+  - You MUST output exactly one object per input token, preserving the original index
+    values. Do not add, remove, reorder, or rename tokens.
+  - Begin your response with [ and end it with ].
 
 prompts:
   z_shot_local: |
@@ -76,6 +80,7 @@ prompts:
     is a repetition (ciu=0). Function words "the"/"is"/"in" are words but not CIUs.
 
     Now label the input below. Output ONLY the JSON array — no other text.
+    YOUR RESPONSE MUST START WITH [ AND CONTAIN ONLY THE JSON ARRAY.
 
     <input>
     CHUNK: {{utterance_id}}
@@ -93,6 +98,7 @@ prompts:
     {{few_shot_examples}}
 
     Now label the input below. Output ONLY the JSON array — no other text.
+    YOUR RESPONSE MUST START WITH [ AND CONTAIN ONLY THE JSON ARRAY.
 
     <input>
     CHUNK: {{utterance_id}}
@@ -110,6 +116,7 @@ prompts:
     {{few_shot_examples}}
 
     Now label the full transcript below. Output ONLY the JSON array — no other text.
+    YOUR RESPONSE MUST START WITH [ AND CONTAIN ONLY THE JSON ARRAY.
 
     <input>
     TRANSCRIPT: {{utterance_id}}

@@ -6,7 +6,7 @@ __author__ = "Jason M. Pittman"
 __copyright__ = "Copyright 2026"
 __credits__ = ["Jason M. Pittman"]
 __license__ = "Apache License 2.0"
-__version__ = "0.2.6"
+__version__ = "0.2.7"
 __maintainer__ = "Jason M. Pittman"
 __status__ = "Research"
 
@@ -31,7 +31,7 @@ parser to reconstruct chunk order and provenance.
 Changes from v0.2.1
 -------------------
 - Chunking via chunk_transcript() / build_token_block_from_chunk() from utils.
-- --chunk-size CLI flag (default 50).
+- --chunk-size CLI flag (default 0 = read from config.yaml inference.chunk_size).
 - seed written into every output JSON wrapper (carried forward from v0.2.1).
 - --few-shot-strategy flag (carried forward from v0.2.1).
 - save_run_metadata() sidecar (carried forward from v0.2.1).
@@ -193,11 +193,12 @@ def main(
         help="Few-shot selection strategy: 'random' or 'severity_stratified'.",
     ),
     chunk_size: int = typer.Option(
-        50,
+        0,
         help=(
             "Maximum tokens per chunk. Transcripts longer than this are split "
             "into contiguous non-overlapping chunks before inference. "
-            "Set to 0 to disable chunking (not recommended for 7-8B models)."
+            "Defaults to 0, which reads chunk_size from config.yaml "
+            "(inference.chunk_size). Pass an explicit value to override."
         ),
     ),
     seed: int = typer.Option(2025, help="Random seed."),

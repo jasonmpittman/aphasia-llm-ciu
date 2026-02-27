@@ -3,10 +3,15 @@ data:
   prompt_ids: data/splits/prompt_ids.txt
   eval_ids: data/splits/eval_ids.txt
 
+# Inference defaults
+inference:
+  chunk_size: 16        # tokens per chunk; ~700 output tokens needed, fits within max_new_tokens
+  min_chunk_size: 10    # remainder chunks smaller than this are merged into the preceding chunk
+
 models:
   phi3-mini:
     model_name: microsoft/Phi-3-mini-4k-instruct
-    max_new_tokens: 512
+    max_new_tokens: 3000  # was 512; 32-token chunk needs ~700 output tokens, 1500 gives headroom
     finetune:
       use_qlora: false
       max_seq_length: 1024
@@ -16,7 +21,7 @@ models:
 
   llama3-8b:
     model_name: meta-llama/Llama-3.1-8B-Instruct
-    max_new_tokens: 1024
+    max_new_tokens: 3000  # was 1024; same reasoning
     finetune:
       use_qlora: false
       max_seq_length: 768
@@ -26,7 +31,7 @@ models:
 
   qwen2.5-7b:
     model_name: Qwen/Qwen2.5-7B-Instruct
-    max_new_tokens: 1024
+    max_new_tokens: 3000  # was 1024
     finetune:
       use_qlora: false
       max_seq_length: 768
@@ -36,7 +41,7 @@ models:
 
   mistral-7b:
     model_name: mistralai/Mistral-7B-Instruct-v0.3
-    max_new_tokens: 1024
+    max_new_tokens: 3000  # was 1024
     finetune:
       use_qlora: false
       max_seq_length: 768

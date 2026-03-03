@@ -6,7 +6,7 @@
 # __copyright__ = "Copyright 2026"
 # __credits__   = ["Jason M. Pittman"]
 # __license__   = "Apache License 2.0"
-# __version__   = "0.2.1"
+# __version__   = "0.2.3"
 # __maintainer__ = "Jason M. Pittman"
 # __status__    = "Research"
 #
@@ -145,7 +145,7 @@ else
   echo "=== Step 2: Create prompt/eval splits ==="
   run python src/split_dataset.py \
     --input-path "$LABELED_PARQUET" \
-    --prompt-n 30 \
+    --prompt-n 5 \
     --seed 2025
   mark_done "$CELL"
 fi
@@ -192,7 +192,7 @@ for MODEL_KEY in "${MODEL_KEYS[@]}"; do
 
       RAW_DIR="results/raw/hf_local/${MODEL_KEY}/${MODE}/seed${SEED}"
       PARSED="results/parsed/llm_predictions_${MODEL_KEY}_${MODE}_seed${SEED}.parquet"
-      METRICS="results/metrics/summary_${MODEL_KEY}_${MODE}_seed${SEED}.csv"
+      METRICS="results/metrics/${MODEL_KEY}/${MODE}/seed${SEED}"
 
       run python src/run_llm_inference.py \
         --config-path "$CONFIG_PATH" \
@@ -208,7 +208,7 @@ for MODEL_KEY in "${MODEL_KEYS[@]}"; do
 
       run python src/compute_metrics.py \
         --merged-path "$PARSED" \
-        --out-path    "$METRICS"
+        --out-dir     "$METRICS"
 
       mark_done "$CELL"
     done
@@ -253,7 +253,7 @@ else
       ADAPTER_DIR="models/llm/${MODEL_KEY}-ciu-lora"
       RAW_DIR="results/raw/hf_local/${MODEL_KEY}/lora_z_shot/seed${SEED}"
       PARSED="results/parsed/llm_predictions_${MODEL_KEY}_lora_z_shot_seed${SEED}.parquet"
-      METRICS="results/metrics/summary_${MODEL_KEY}_lora_z_shot_seed${SEED}.csv"
+      METRICS="results/metrics/${MODEL_KEY}/lora_z_shot/seed${SEED}"
 
       echo ""
       echo "--- LoRA inference: model=$MODEL_KEY  seed=$SEED ---"
@@ -273,7 +273,7 @@ else
 
       run python src/compute_metrics.py \
         --merged-path "$PARSED" \
-        --out-path    "$METRICS"
+        --out-dir     "$METRICS"
 
       mark_done "$CELL"
     done
@@ -311,7 +311,7 @@ else
 
       RAW_DIR="results/raw/ablations/n_few_shot/${ABLATION_MODEL_KEY}/n${N}/seed${SEED}"
       PARSED="results/parsed/ablation_nfewshot${N}_${ABLATION_MODEL_KEY}_seed${SEED}.parquet"
-      METRICS="results/metrics/ablation_nfewshot${N}_${ABLATION_MODEL_KEY}_seed${SEED}.csv"
+      METRICS="results/metrics/ablations/n_few_shot/${ABLATION_MODEL_KEY}/n${N}/seed${SEED}"
 
       echo ""
       echo "--- Ablation A: n=$N  model=$ABLATION_MODEL_KEY  seed=$SEED ---"
@@ -330,7 +330,7 @@ else
 
       run python src/compute_metrics.py \
         --merged-path "$PARSED" \
-        --out-path    "$METRICS"
+        --out-dir     "$METRICS"
 
       mark_done "$CELL"
     done
@@ -351,7 +351,7 @@ else
 
       RAW_DIR="results/raw/ablations/strategy/${ABLATION_MODEL_KEY}/${STRATEGY}/seed${SEED}"
       PARSED="results/parsed/ablation_${STRATEGY}_${ABLATION_MODEL_KEY}_seed${SEED}.parquet"
-      METRICS="results/metrics/ablation_${STRATEGY}_${ABLATION_MODEL_KEY}_seed${SEED}.csv"
+      METRICS="results/metrics/ablations/strategy/${ABLATION_MODEL_KEY}/${STRATEGY}/seed${SEED}"
 
       echo ""
       echo "--- Ablation B: strategy=$STRATEGY  model=$ABLATION_MODEL_KEY  seed=$SEED ---"
@@ -370,11 +370,65 @@ else
 
       run python src/compute_metrics.py \
         --merged-path "$PARSED" \
-        --out-path    "$METRICS"
+        --out-dir     "$METRICS"
 
       mark_done "$CELL"
     done
   done
+fi
+
+# ---------------------------------------------------------------------------
+# Step 7 — Aggregate all per-cell parquets and run McNemar's tests
+#
+# McNemar's test is a pairwise comparison across (model, mode) conditions.
+# It requires all predictions to be present in one parquet — running it
+# per-cell (as Steps 4-6 do) always produces an empty result.  This step
+# concatenates every per-cell parquet and runs compute_metrics.py once more
+# on the combined file so McNemar's tests are actually populated.
+# ---------------------------------------------------------------------------
+CELL="aggregate_and_mcnemar"
+if cell_done "$CELL"; then
+  echo "[skip] $CELL already complete."
+else
+  echo ""
+  echo "=== Step 7: Aggregate predictions and run McNemar's tests ==="
+
+  AGGREGATED="results/parsed/all_predictions.parquet"
+  AGGREGATED_METRICS="results/metrics/aggregate"
+
+  # Concatenate all per-cell parquets via Python — handles missing files
+  # gracefully so a partially-completed matrix still produces valid output.
+  run python3 - << 'PYEOF'
+import pandas as pd
+from pathlib import Path
+
+parsed_dir = Path("results/parsed")
+parquets = sorted(parsed_dir.glob("*.parquet"))
+
+if not parquets:
+    print("WARNING: no parquet files found in results/parsed/ — skipping aggregation.")
+else:
+    dfs = []
+    for p in parquets:
+        try:
+            dfs.append(pd.read_parquet(p))
+            print(f"  loaded: {p.name}  ({len(dfs[-1])} rows)")
+        except Exception as e:
+            print(f"  WARNING: could not load {p.name}: {e}")
+
+    if dfs:
+        combined = pd.concat(dfs, ignore_index=True)
+        out = Path("results/parsed/all_predictions.parquet")
+        out.parent.mkdir(parents=True, exist_ok=True)
+        combined.to_parquet(out, index=False)
+        print(f"Aggregated {len(dfs)} files → {len(combined)} rows → {out}")
+    else:
+        print("WARNING: no files could be loaded — aggregation skipped.")
+PYEOF
+
+  run python src/compute_metrics.py     --merged-path "$AGGREGATED"     --out-dir     "$AGGREGATED_METRICS"
+
+  mark_done "$CELL"
 fi
 
 # ---------------------------------------------------------------------------

@@ -1,5 +1,7 @@
 # aphasia-llm-ciu
 
+[![DOI](https://zenodo.org/badge/1163398440.svg)](https://doi.org/10.5281/zenodo.19484477)
+
 Benchmarking local LLMs and baseline models for Correct Information Unit (CIU) token classification in aphasia speech samples.
 
 The repository centers on a labeled token dataset from a prior CIU study and provides an end-to-end pipeline to:
@@ -29,7 +31,6 @@ The repository centers on a labeled token dataset from a prior CIU study and pro
 - `phi3-mini`
 - `llama3-8b`
 - `qwen2.5-7b`
-- `mistral-7b`
 
 Inference defaults are chunk-based to keep long transcripts within context limits:
 
